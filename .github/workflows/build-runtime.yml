@@ -1,0 +1,40 @@
+name: Build SA-MP Windows All-in-One Runtime
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build All-in-One Runtime Archive
+        run: |
+          chmod +x scripts/build_in_container.sh scripts/package_all.sh
+          ./scripts/package_all.sh
+
+      - name: Upload Release Asset (samp-win-runtime-all-in-one.tar.xz)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: "SA-MP Windows Server Android Runtime v1.0.0 (All-in-One)"
+          body: |
+            ### All-in-One Headless Runtime Package for Android (`arm64-v8a` & `armeabi-v7a`)
+            Includes:
+            - Static `qemu-i386` translator binaries for **ARM64 (`arm64-v8a`)** and **ARM32 (`armeabi-v7a`)** (No `proot` needed)
+            - Stripped Headless **Wine i386 Console** + pre-initialized `WINEPREFIX`
+            - Complete **Visual C++ Redistributable (`msvcr80` - `vcruntime140`, `msvcp140`)** + **`libmariadb.dll` / `libmysql.dll`** in `system32`
+            - **MariaDB Server (`127.0.0.1:3306`)** pre-initialized with `root` (no password)
+            - **PHP CLI + phpMyAdmin (`127.0.0.1:8080`)** pre-configured for XAMPP-like database management
+          draft: false
+          prerelease: false
+          files: |
+            dist/samp-win-runtime-all-in-one.tar.xz
+            dist/samp-win-runtime-all-in-one.tar.xz.sha256
