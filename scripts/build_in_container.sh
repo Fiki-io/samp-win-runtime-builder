@@ -3,7 +3,7 @@ set -euxo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
-# 1. Install minimal required packages for Wine i386 headless, MariaDB, and PHP
+# 1. Install minimal required packages for Wine i386 headless, MariaDB, and PHP (without php-gd video codec bloat)
 apt-get update
 apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -22,8 +22,7 @@ apt-get install -y --no-install-recommends \
     php-mbstring \
     php-xml \
     php-zip \
-    php-curl \
-    php-gd
+    php-curl
 
 mkdir -p /opt/samp-runtime/{wineprefix,mysql_data,phpmyadmin,etc,tmp,run}
 
@@ -169,7 +168,6 @@ extension=pdo_mysql
 extension=mbstring
 extension=zip
 extension=curl
-extension=gd
 memory_limit = 256M
 upload_max_filesize = 128M
 post_max_size = 128M
@@ -201,9 +199,7 @@ if [ -d "$WINE_WIN" ]; then
 fi
 
 rm -rf /usr/lib/i386-linux-gnu/dri /usr/lib/i386-linux-gnu/libLLVM*.so* \
-       /usr/lib/i386-linux-gnu/libvulkan*.so* /usr/lib/i386-linux-gnu/libx265*.so* \
-       /usr/lib/i386-linux-gnu/libaom*.so* /usr/lib/i386-linux-gnu/librav1e*.so* \
-       /usr/lib/i386-linux-gnu/libgav1*.so* /usr/lib/i386-linux-gnu/libde265*.so* || true
+       /usr/lib/i386-linux-gnu/libvulkan*.so* || true
 
 # Strip debug symbols from shared objects and binaries
 find /usr/lib /usr/bin /usr/sbin -type f \( -name "*.so*" -o -executable \) -exec strip --strip-unneeded {} + 2>/dev/null || true
@@ -218,7 +214,7 @@ if echo "$PHP_OUT" | grep -qi "warning"; then
     exit 1
 fi
 php -c /opt/samp-runtime/etc/php.ini -l /opt/samp-runtime/phpmyadmin/config.inc.php
-php -c /opt/samp-runtime/etc/php.ini -m | grep -E "^(mysqli|pdo_mysql|mbstring|zip|xml|curl|gd)$"
+php -c /opt/samp-runtime/etc/php.ini -m | grep -E "^(mysqli|pdo_mysql|mbstring|zip|xml|curl)$"
 
 # 10. Clean apt caches, docs, locales, and temporary build tools
 apt-get remove -y cabextract wget unzip xz-utils binutils || true
