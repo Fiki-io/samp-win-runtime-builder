@@ -72,14 +72,15 @@ if wget -q -O /tmp/mariadb-win32.zip "https://archive.mariadb.org/connector-c-3.
     rm -rf /tmp/mariadb-win32.zip /tmp/mariadb-win32
 fi
 
-# 4. Write lightweight MariaDB configuration optimized for Android RAM
-cat > /opt/samp-runtime/etc/my.cnf << EOF
+# 4. Write lightweight MariaDB configuration optimized for Android RAM & QEMU user-mode (innodb_use_native_aio=0)
+cat > /opt/samp-runtime/etc/my.cnf << 'EOF'
 [mysqld]
 user=root
 bind-address=127.0.0.1
 port=3306
 innodb_buffer_pool_size=16M
 innodb_log_file_size=8M
+innodb_use_native_aio=0
 max_connections=32
 performance_schema=OFF
 skip-name-resolve
@@ -114,11 +115,11 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-mysql --socket=/opt/samp-runtime/run/mysqld.sock -u root << EOF
-ALTER USER root@localhost IDENTIFIED VIA mysql_native_password USING PASSWORD();
-CREATE USER IF NOT EXISTS root@127.0.0.1 IDENTIFIED VIA mysql_native_password USING PASSWORD();
-GRANT ALL PRIVILEGES ON *.* TO root@127.0.0.1 WITH GRANT OPTION;
-GRANT ALL PRIVILEGES ON *.* TO root@localhost WITH GRANT OPTION;
+mysql --socket=/opt/samp-runtime/run/mysqld.sock -u root << 'EOF'
+ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('');
+CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('');
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;
 CREATE DATABASE IF NOT EXISTS samp_db;
 FLUSH PRIVILEGES;
 EOF
@@ -132,21 +133,21 @@ tar -xJf /tmp/phpmyadmin.tar.xz -C /opt/samp-runtime/phpmyadmin --strip-componen
 rm -f /tmp/phpmyadmin.tar.xz
 rm -rf /opt/samp-runtime/phpmyadmin/{doc,examples,setup,sql,test}
 
-cat > /opt/samp-runtime/phpmyadmin/config.inc.php << EOF
+cat > /opt/samp-runtime/phpmyadmin/config.inc.php << 'EOF'
 <?php
 declare(strict_types=1);
-$cfg[blowfish_secret] = SampAndroidRunnerSecretKey2026XamppStyle;
+$cfg['blowfish_secret'] = 'SampAndroidRunnerSecretKey2026XamppStyle';
 $i = 1;
-$cfg[Servers][$i][auth_type] = config;
-$cfg[Servers][$i][host] = 127.0.0.1;
-$cfg[Servers][$i][port] = 3306;
-$cfg[Servers][$i][user] = root;
-$cfg[Servers][$i][password] = ;
-$cfg[Servers][$i][compress] = false;
-$cfg[Servers][$i][AllowNoPassword] = true;
-$cfg[TempDir] = /opt/samp-runtime/tmp;
-$cfg[SendErrorReports] = never;
-$cfg[ShowPhpInfo] = false;
+$cfg['Servers'][$i]['auth_type'] = 'config';
+$cfg['Servers'][$i]['host'] = '127.0.0.1';
+$cfg['Servers'][$i]['port'] = '3306';
+$cfg['Servers'][$i]['user'] = 'root';
+$cfg['Servers'][$i]['password'] = '';
+$cfg['Servers'][$i]['compress'] = false;
+$cfg['Servers'][$i]['AllowNoPassword'] = true;
+$cfg['TempDir'] = '/opt/samp-runtime/tmp';
+$cfg['SendErrorReports'] = 'never';
+$cfg['ShowPhpInfo'] = false;
 EOF
 
 # 7. Write pre-configured php.ini for large .sql imports
@@ -192,10 +193,11 @@ fi
 rm -rf /usr/lib/i386-linux-gnu/dri /usr/lib/i386-linux-gnu/libLLVM*.so* \
        /usr/lib/i386-linux-gnu/libvulkan*.so* || true
 
-# 9. Verify Wine, MariaDB, and PHP still execute cleanly after stripping
+# 9. Verify Wine, MariaDB, PHP, and config.inc.php syntax after stripping
 wine --version
 mariadbd --version
 php -c /opt/samp-runtime/etc/php.ini -v
+php -c /opt/samp-runtime/etc/php.ini -l /opt/samp-runtime/phpmyadmin/config.inc.php
 php -c /opt/samp-runtime/etc/php.ini -m | grep -E "mysqli|mbstring|zip"
 
 # 10. Clean apt caches, docs, locales, and temporary files
