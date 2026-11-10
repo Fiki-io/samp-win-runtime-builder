@@ -40,7 +40,6 @@ wineserver -w || true
 SYS32="/opt/samp-runtime/wineprefix/drive_c/windows/system32"
 mkdir -p "$SYS32"
 
-# Ensure all Wine built-in C/C++ runtime PE DLLs are copied into system32
 for dll in msvcp80.dll msvcr80.dll msvcp90.dll msvcr90.dll msvcp100.dll msvcr100.dll \
            msvcp110.dll msvcr110.dll msvcp120.dll msvcr120.dll msvcp140.dll msvcp140_1.dll \
            msvcp140_2.dll vcruntime140.dll concrt140.dll vcomp140.dll ucrtbase.dll \
@@ -50,7 +49,6 @@ for dll in msvcp80.dll msvcr80.dll msvcp90.dll msvcr90.dll msvcp100.dll msvcr100
     fi
 done
 
-# Extract official Microsoft VC++ 2015-2022 x86 redistributable DLLs if reachable
 if wget -q -O /tmp/vc_redist.x86.exe "https://aka.ms/vs/17/release/vc_redist.x86.exe"; then
     mkdir -p /tmp/vcredist
     cabextract -q -d /tmp/vcredist /tmp/vc_redist.x86.exe || true
@@ -63,7 +61,6 @@ if wget -q -O /tmp/vc_redist.x86.exe "https://aka.ms/vs/17/release/vc_redist.x86
     rm -rf /tmp/vc_redist.x86.exe /tmp/vcredist
 fi
 
-# Download official MariaDB Connector/C Win32 DLL (libmariadb.dll & libmysql.dll) for SA-MP mysql.dll plugin
 if wget -q -O /tmp/mariadb-win32.zip "https://archive.mariadb.org/connector-c-3.3.8/mariadb-connector-c-3.3.8-win32.zip"; then
     mkdir -p /tmp/mariadb-win32
     unzip -q /tmp/mariadb-win32.zip -d /tmp/mariadb-win32
@@ -76,7 +73,7 @@ if wget -q -O /tmp/mariadb-win32.zip "https://archive.mariadb.org/connector-c-3.
 fi
 
 # 4. Write lightweight MariaDB configuration optimized for Android RAM
-cat > /opt/samp-runtime/etc/my.cnf << 'EOF'
+cat > /opt/samp-runtime/etc/my.cnf << EOF
 [mysqld]
 user=root
 bind-address=127.0.0.1
@@ -117,11 +114,11 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-mysql --socket=/opt/samp-runtime/run/mysqld.sock -u root << 'EOF'
-ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('');
-CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('');
-GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
-GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;
+mysql --socket=/opt/samp-runtime/run/mysqld.sock -u root << EOF
+ALTER USER root@localhost IDENTIFIED VIA mysql_native_password USING PASSWORD();
+CREATE USER IF NOT EXISTS root@127.0.0.1 IDENTIFIED VIA mysql_native_password USING PASSWORD();
+GRANT ALL PRIVILEGES ON *.* TO root@127.0.0.1 WITH GRANT OPTION;
+GRANT ALL PRIVILEGES ON *.* TO root@localhost WITH GRANT OPTION;
 CREATE DATABASE IF NOT EXISTS samp_db;
 FLUSH PRIVILEGES;
 EOF
@@ -135,27 +132,27 @@ tar -xJf /tmp/phpmyadmin.tar.xz -C /opt/samp-runtime/phpmyadmin --strip-componen
 rm -f /tmp/phpmyadmin.tar.xz
 rm -rf /opt/samp-runtime/phpmyadmin/{doc,examples,setup,sql,test}
 
-cat > /opt/samp-runtime/phpmyadmin/config.inc.php << 'EOF'
+cat > /opt/samp-runtime/phpmyadmin/config.inc.php << EOF
 <?php
 declare(strict_types=1);
-$cfg['blowfish_secret'] = 'SampAndroidRunnerSecretKey2026XamppStyle';
+$cfg[blowfish_secret] = SampAndroidRunnerSecretKey2026XamppStyle;
 $i = 1;
-$cfg['Servers'][$i]['auth_type'] = 'config';
-$cfg['Servers'][$i]['host'] = '127.0.0.1';
-$cfg['Servers'][$i]['port'] = '3306';
-$cfg['Servers'][$i]['user'] = 'root';
-$cfg['Servers'][$i]['password'] = '';
-$cfg['Servers'][$i]['compress'] = false;
-$cfg['Servers'][$i]['AllowNoPassword'] = true;
-$cfg['TempDir'] = '/opt/samp-runtime/tmp';
-$cfg['SendErrorReports'] = 'never';
-$cfg['ShowPhpInfo'] = false;
+$cfg[Servers][$i][auth_type] = config;
+$cfg[Servers][$i][host] = 127.0.0.1;
+$cfg[Servers][$i][port] = 3306;
+$cfg[Servers][$i][user] = root;
+$cfg[Servers][$i][password] = ;
+$cfg[Servers][$i][compress] = false;
+$cfg[Servers][$i][AllowNoPassword] = true;
+$cfg[TempDir] = /opt/samp-runtime/tmp;
+$cfg[SendErrorReports] = never;
+$cfg[ShowPhpInfo] = false;
 EOF
 
 # 7. Write pre-configured php.ini for large .sql imports
-PHP_VER=$(php -r "echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;")
+EXT_DIR=$(find /usr/lib/php -maxdepth 1 -type d -name "20*" | head -n 1)
 cat > /opt/samp-runtime/etc/php.ini << EOF
-extension_dir = "/usr/lib/php/$(php-config --extension-dir 2>/dev/null | xargs basename 2>/dev/null || find /usr/lib/php -maxdepth 1 -type d -name "20*" | head -n 1 | xargs basename)"
+extension_dir = "$EXT_DIR"
 extension=mysqli
 extension=pdo_mysql
 extension=mbstring
@@ -174,10 +171,6 @@ mysqli.default_user = root
 session.save_path = "/opt/samp-runtime/tmp"
 sys_temp_dir = "/opt/samp-runtime/tmp"
 EOF
-
-# Fix extension_dir path dynamically
-EXT_DIR=$(find /usr/lib/php -maxdepth 1 -type d -name "20*" | head -n 1)
-sed -i "s|^extension_dir = .*|extension_dir = "$EXT_DIR"|" /opt/samp-runtime/etc/php.ini
 
 # 8. Strip unneeded Wine GUI/DirectX/Audio/Media bloat to keep archive compact
 WINE_WIN="/usr/lib/i386-linux-gnu/wine/i386-windows"
@@ -205,7 +198,7 @@ mariadbd --version
 php -c /opt/samp-runtime/etc/php.ini -v
 php -c /opt/samp-runtime/etc/php.ini -m | grep -E "mysqli|mbstring|zip"
 
-# 10. Clean apt caches, docs, locales, and strip shared libraries
+# 10. Clean apt caches, docs, locales, and temporary files
 apt-get remove -y cabextract wget unzip xz-utils binutils || true
 apt-get autoremove -y || true
 apt-get clean
