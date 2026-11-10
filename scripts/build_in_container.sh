@@ -51,12 +51,14 @@ done
 
 if wget -q -O /tmp/vc_redist.x86.exe "https://aka.ms/vs/17/release/vc_redist.x86.exe"; then
     mkdir -p /tmp/vcredist
-    cabextract -q -d /tmp/vcredist /tmp/vc_redist.x86.exe || true
+    cabextract -q -d /tmp/vcredist /tmp/vc_redist.x86.exe 2>/dev/null || true
     for cab in /tmp/vcredist/a*; do
-        [ -f "$cab" ] && cabextract -q -d /tmp/vcredist/extracted "$cab" || true
+        if [ -f "$cab" ] && cabextract -l "$cab" >/dev/null 2>&1; then
+            cabextract -q -d /tmp/vcredist/extracted "$cab" 2>/dev/null || true
+        fi
     done
     if [ -d /tmp/vcredist/extracted ]; then
-        find /tmp/vcredist/extracted -iname "*.dll" -exec cp -f {} "$SYS32/" \; || true
+        find /tmp/vcredist/extracted -iname "*.dll" -exec cp -f {} "$SYS32/" \;
     fi
     rm -rf /tmp/vc_redist.x86.exe /tmp/vcredist
 fi
@@ -72,7 +74,7 @@ if wget -q -O /tmp/mariadb-win32.zip "https://archive.mariadb.org/connector-c-3.
     rm -rf /tmp/mariadb-win32.zip /tmp/mariadb-win32
 fi
 
-# 4. Write lightweight MariaDB configuration optimized for Android RAM & QEMU user-mode (innodb_use_native_aio=0)
+# 4. Write lightweight MariaDB configuration optimized for Android RAM & QEMU user-mode
 cat > /opt/samp-runtime/etc/my.cnf << 'EOF'
 [mysqld]
 user=root
@@ -93,12 +95,13 @@ port=3306
 user=root
 EOF
 
-# 5. Pre-initialize MariaDB data directory and configure root user with empty password (XAMPP style)
+# 5. Pre-initialize MariaDB data directory, remove Docker hostname entries, and set root empty password
 mariadb-install-db --no-defaults \
     --basedir=/usr \
     --datadir=/opt/samp-runtime/mysql_data \
     --auth-root-authentication-method=normal \
-    --skip-test-db
+    --skip-test-db \
+    --innodb-use-native-aio=0
 
 mariadbd --defaults-file=/opt/samp-runtime/etc/my.cnf \
     --basedir=/usr \
@@ -116,6 +119,8 @@ for i in $(seq 1 30); do
 done
 
 mysql --socket=/opt/samp-runtime/run/mysqld.sock -u root << 'EOF'
+DELETE FROM mysql.user WHERE Host NOT IN ('localhost', '127.0.0.1', '::1');
+DELETE FROM mysql.proxies_priv WHERE Host NOT IN ('localhost', '127.0.0.1', '::1');
 ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('');
 CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('');
 GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
@@ -150,14 +155,18 @@ $cfg['SendErrorReports'] = 'never';
 $cfg['ShowPhpInfo'] = false;
 EOF
 
-# 7. Write pre-configured php.ini for large .sql imports
+# 7. Write self-contained php.ini with proper module load order (mysqlnd & pdo FIRST) and remove duplicate conf.d
 EXT_DIR=$(find /usr/lib/php -maxdepth 1 -type d -name "20*" | head -n 1)
+rm -rf /etc/php/*/cli/conf.d/*.ini
+
 cat > /opt/samp-runtime/etc/php.ini << EOF
 extension_dir = "$EXT_DIR"
+extension=mysqlnd
+extension=pdo
+extension=xml
 extension=mysqli
 extension=pdo_mysql
 extension=mbstring
-extension=xml
 extension=zip
 extension=curl
 extension=gd
@@ -173,7 +182,7 @@ session.save_path = "/opt/samp-runtime/tmp"
 sys_temp_dir = "/opt/samp-runtime/tmp"
 EOF
 
-# 8. Strip unneeded Wine GUI/DirectX/Audio/Media bloat to keep archive compact
+# 8. Strip unneeded Wine GUI/DirectX/Audio/Media bloat and strip ELF debug symbols to shrink size
 WINE_WIN="/usr/lib/i386-linux-gnu/wine/i386-windows"
 if [ -d "$WINE_WIN" ]; then
     rm -f "$WINE_WIN"/d3d*.dll "$WINE_WIN"/wined3d.dll "$WINE_WIN"/dxgi.dll \
@@ -186,21 +195,32 @@ if [ -d "$WINE_WIN" ]; then
           "$WINE_WIN"/gphoto2.ds "$WINE_WIN"/dmusic*.dll "$WINE_WIN"/dmime.dll \
           "$WINE_WIN"/dmsynth.dll "$WINE_WIN"/dmloader.dll "$WINE_WIN"/dsound.dll \
           "$WINE_WIN"/dinput*.dll "$WINE_WIN"/xinput*.dll "$WINE_WIN"/*.acm \
-          "$WINE_WIN"/qedit.dll "$WINE_WIN"/quartz.dll "$WINE_WIN"/wmvcore.dll || true
+          "$WINE_WIN"/qedit.dll "$WINE_WIN"/quartz.dll "$WINE_WIN"/wmvcore.dll \
+          "$WINE_WIN"/winebrowser.exe "$WINE_WIN"/winhlp32.exe "$WINE_WIN"/hh.exe \
+          "$WINE_WIN"/control.exe "$WINE_WIN"/taskmgr.exe "$WINE_WIN"/explorer.exe || true
 fi
 
-# Remove GPU DRI drivers and LLVM (not linked by console Wine, MariaDB, or PHP)
 rm -rf /usr/lib/i386-linux-gnu/dri /usr/lib/i386-linux-gnu/libLLVM*.so* \
-       /usr/lib/i386-linux-gnu/libvulkan*.so* || true
+       /usr/lib/i386-linux-gnu/libvulkan*.so* /usr/lib/i386-linux-gnu/libx265*.so* \
+       /usr/lib/i386-linux-gnu/libaom*.so* /usr/lib/i386-linux-gnu/librav1e*.so* \
+       /usr/lib/i386-linux-gnu/libgav1*.so* /usr/lib/i386-linux-gnu/libde265*.so* || true
 
-# 9. Verify Wine, MariaDB, PHP, and config.inc.php syntax after stripping
+# Strip debug symbols from shared objects and binaries
+find /usr/lib /usr/bin /usr/sbin -type f \( -name "*.so*" -o -executable \) -exec strip --strip-unneeded {} + 2>/dev/null || true
+
+# 9. Strict verification: ensure ZERO PHP startup warnings and all required extensions load
 wine --version
 mariadbd --version
-php -c /opt/samp-runtime/etc/php.ini -v
+PHP_OUT=$(php -c /opt/samp-runtime/etc/php.ini -v 2>&1)
+echo "$PHP_OUT"
+if echo "$PHP_OUT" | grep -qi "warning"; then
+    echo "ERROR: PHP startup produced warnings!"
+    exit 1
+fi
 php -c /opt/samp-runtime/etc/php.ini -l /opt/samp-runtime/phpmyadmin/config.inc.php
-php -c /opt/samp-runtime/etc/php.ini -m | grep -E "mysqli|mbstring|zip"
+php -c /opt/samp-runtime/etc/php.ini -m | grep -E "^(mysqli|pdo_mysql|mbstring|zip|xml|curl|gd)$"
 
-# 10. Clean apt caches, docs, locales, and temporary files
+# 10. Clean apt caches, docs, locales, and temporary build tools
 apt-get remove -y cabextract wget unzip xz-utils binutils || true
 apt-get autoremove -y || true
 apt-get clean
